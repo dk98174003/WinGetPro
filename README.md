@@ -16,7 +16,8 @@ URLs (WinGet docs):
 * [https://learn.microsoft.com/en-us/windows/package-manager/winget/upgrade](https://learn.microsoft.com/en-us/windows/package-manager/winget/upgrade)
 * [https://learn.microsoft.com/en-us/windows/package-manager/winget/pinning](https://learn.microsoft.com/en-us/windows/package-manager/winget/pinning)
 
-<img width="1251" height="715" alt="billede" src="https://github.com/user-attachments/assets/189c1452-7776-4751-8d5e-6360868a0725" />
+<img width="1255" height="711" alt="billede" src="https://github.com/user-attachments/assets/77886ded-be33-440e-a575-b8635f25217e" />
+
 
 Have fun and keep you computer uptodate.
 Knud ;O)
