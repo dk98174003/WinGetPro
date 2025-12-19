@@ -8,7 +8,8 @@ From the same page you can install, upgrade, or uninstall selected packages, and
 
 The Search field also works as a live filter in the Installed and Upgrades views, and the result list supports column sorting by clicking the headers.
 
-<img width="1162" height="740" alt="billede" src="https://github.com/user-attachments/assets/af828491-eb7e-403f-b385-81246c7397e6" />
+<img width="1177" height="755" alt="billede" src="https://github.com/user-attachments/assets/17bad0f9-4b62-4587-8840-d98fbee1fa5a" />
+
 
 URLs (WinGet docs):
 
