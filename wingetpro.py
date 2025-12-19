@@ -24,6 +24,8 @@ import queue
 import sys
 import shutil
 import re
+import urllib.parse
+import webbrowser
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 
@@ -308,6 +310,7 @@ class WingetGui(tk.Tk):
                 w = 110
             self.tree.column(c, width=w, anchor="w", stretch=(c == "Name"))
         self.tree.grid(row=0, column=0, sticky="nsew")
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
 
         ysb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         xsb = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree.xview)
@@ -328,6 +331,8 @@ class WingetGui(tk.Tk):
         self.menu.add_command(label="Unpin selected", command=self.unpin_selected)
         self.menu.add_separator()
         self.menu.add_command(label="Copy Id", command=self.copy_selected_id)
+        self.menu.add_command(label="Open Winstall page", command=self.open_winstall_selected)
+        self.menu.add_command(label="Open winget.run page", command=self.open_wingetrun_selected)
         self.tree.bind("<Button-3>", self._popup_menu)
 
         # Log
@@ -443,6 +448,98 @@ class WingetGui(tk.Tk):
         self.status.set(f"Copied Id: {pid}")
 
     # ---- window icon ----
+
+
+    def _winstall_url_for(self, pkg_id: str, pkg_name: str = "") -> str:
+        """Return a winstall.app URL for a package id/name.
+
+        If pkg_id looks like a normal WinGet id (no backslashes), open the app page.
+        Otherwise, fall back to a winget.run search page (works for ARP/MSIX entries).
+        """
+        pkg_id = (pkg_id or "").strip()
+        pkg_name = (pkg_name or "").strip()
+
+        if pkg_id and "\\" not in pkg_id and not pkg_id.lower().startswith(("arp\\", "msix\\")):
+            return "https://winstall.app/apps/" + urllib.parse.quote(pkg_id, safe="")
+
+        q = pkg_name or pkg_id
+        return "https://winget.run/search?query=" + urllib.parse.quote(q, safe="")
+
+    def _wingetrun_url_for(self, pkg_id: str, pkg_name: str = "") -> str:
+        """Return a winget.run URL for a package id/name.
+
+        For real WinGet IDs (e.g., Microsoft.AppInstaller), open the pkg page.
+        For ARP/MSIX-style entries, fall back to a winget.run search.
+        """
+        pkg_id = (pkg_id or "").strip()
+        pkg_name = (pkg_name or "").strip()
+
+        if pkg_id and "\\" not in pkg_id and not pkg_id.lower().startswith(("arp\\", "msix\\")):
+            # winget.run uses /pkg/<publisher>/<app> style for dot-separated IDs
+            return "https://winget.run/pkg/" + "/".join(urllib.parse.quote(p, safe="") for p in pkg_id.split("."))
+
+        q = pkg_name or pkg_id
+        return "https://winget.run/search?query=" + urllib.parse.quote(q, safe="")
+
+
+    def open_package_page_selected(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            return
+        vals = self.tree.item(sel[0], "values") or ()
+        if len(vals) < 2:
+            return
+        name = vals[0]
+        pkg_id = vals[1]
+        webbrowser.open(self._winstall_url_for(pkg_id, name))
+
+    def open_winstall_selected(self) -> None:
+        """Open the selected package on winstall.app."""
+        sel = self.tree.selection()
+        if not sel:
+            return
+        vals = self.tree.item(sel[0], "values") or ()
+        if len(vals) < 2:
+            return
+        name = vals[0]
+        pkg_id = vals[1]
+        webbrowser.open(self._winstall_url_for(pkg_id, name))
+
+    def open_wingetrun_selected(self) -> None:
+        """Open the selected package on winget.run."""
+        sel = self.tree.selection()
+        if not sel:
+            return
+        vals = self.tree.item(sel[0], "values") or ()
+        if len(vals) < 2:
+            return
+        name = vals[0]
+        pkg_id = vals[1]
+        webbrowser.open(self._wingetrun_url_for(pkg_id, name))
+
+    def _on_tree_double_click(self, event) -> None:
+        row_id = self.tree.identify_row(event.y)
+        if not row_id:
+            return
+        vals = self.tree.item(row_id, "values") or ()
+        if len(vals) < 2:
+            return
+        name = vals[0]
+        pkg_id = vals[1]
+        # Open package info page (winstall has a nice description)
+        webbrowser.open(self._winstall_url_for(pkg_id, name))
+
+        # Double-click on the "Id" column opens the package page
+        if col_index != 1:
+            return
+
+        vals = self.tree.item(row_id, "values") or ()
+        if len(vals) < 2:
+            return
+        name = vals[0]
+        pkg_id = vals[1]
+        webbrowser.open(self._winstall_url_for(pkg_id, name))
+
 
     def _set_window_icon(self) -> None:
         """
