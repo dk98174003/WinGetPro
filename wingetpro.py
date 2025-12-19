@@ -196,7 +196,7 @@ class WingetGui(tk.Tk):
         self.work_q: "queue.Queue[tuple]" = queue.Queue()
         self.current_mode = tk.StringVar(value="Upgrades")  # Search / Upgrades / Installed
         self.search_text = tk.StringVar(value="")
-        self.silent_var = tk.BooleanVar(value=True)
+        self.silent_var = tk.BooleanVar(value=False)
         self.accept_var = tk.BooleanVar(value=True)
         self.include_pinned_var = tk.BooleanVar(value=False)
         self.include_unknown_var = tk.BooleanVar(value=False)
@@ -238,10 +238,10 @@ class WingetGui(tk.Tk):
         top.columnconfigure(3, weight=1)
 
         ttk.Label(top, text="Mode:").grid(row=0, column=0, sticky="w")
-        mode = ttk.Combobox(top, textvariable=self.current_mode, state="readonly",
+        self.mode_combo = ttk.Combobox(top, textvariable=self.current_mode, state="readonly",
                             values=["Upgrades", "Search", "Installed"], width=12)
-        mode.grid(row=0, column=1, padx=(6, 12), sticky="w")
-        mode.bind("<<ComboboxSelected>>", lambda e: self.refresh())
+        self.mode_combo.grid(row=0, column=1, padx=(6, 12), sticky="w")
+        self.mode_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh())
 
         ttk.Label(top, text="Search:").grid(row=0, column=2, sticky="w")
         self.search_entry = ttk.Entry(top, textvariable=self.search_text)
@@ -249,24 +249,37 @@ class WingetGui(tk.Tk):
         self.search_entry.bind("<Return>", lambda e: self.refresh())
         self.search_entry.bind("<KeyRelease>", lambda e: self._on_filter_change())
 
-        ttk.Button(top, text="Refresh", command=self.refresh).grid(row=0, column=4, padx=6)
-        ttk.Button(top, text="Install", command=self.install_selected).grid(row=0, column=5, padx=6)
-        ttk.Button(top, text="Upgrade", command=self.upgrade_selected).grid(row=0, column=6, padx=6)
-        ttk.Button(top, text="Uninstall", command=self.uninstall_selected).grid(row=0, column=7, padx=6)
+        self.btn_refresh = ttk.Button(top, text="Refresh", command=self.refresh)
+        self.btn_refresh.grid(row=0, column=4, padx=6)
+
+        self.btn_install = ttk.Button(top, text="Install", command=self.install_selected)
+        self.btn_install.grid(row=0, column=5, padx=6)
+
+        self.btn_upgrade = ttk.Button(top, text="Upgrade", command=self.upgrade_selected)
+        self.btn_upgrade.grid(row=0, column=6, padx=6)
+
+        self.btn_upgrade_all = ttk.Button(top, text="Upgrade All", command=self.upgrade_all)
+        self.btn_upgrade_all.grid(row=0, column=7, padx=6)
+
+        self.btn_uninstall = ttk.Button(top, text="Uninstall", command=self.uninstall_selected)
+        self.btn_uninstall.grid(row=0, column=8, padx=6)
 
         # Options row
         opt = ttk.Frame(self, padding=(8, 0, 8, 6))
         opt.grid(row=1, column=0, sticky="ew")
         opt.columnconfigure(6, weight=1)
 
-        ttk.Checkbutton(opt, text="Silent", variable=self.silent_var).grid(row=0, column=0, padx=(0, 10), sticky="w")
+        ttk.Checkbutton(opt, text="Silent (no UI)", variable=self.silent_var).grid(row=0, column=0, padx=(0, 10), sticky="w")
         ttk.Checkbutton(opt, text="Auto-accept agreements", variable=self.accept_var).grid(row=0, column=1, padx=(0, 10), sticky="w")
         ttk.Checkbutton(opt, text="Include pinned (upgrades)", variable=self.include_pinned_var).grid(row=0, column=2, padx=(0, 10), sticky="w")
         ttk.Checkbutton(opt, text="Include unknown (upgrades)", variable=self.include_unknown_var).grid(row=0, column=3, padx=(0, 10), sticky="w")
         ttk.Checkbutton(opt, text="Uninstall: force source=winget", variable=self.uninstall_source_winget_var).grid(row=0, column=4, padx=(0, 10), sticky="w")
 
-        ttk.Button(opt, text="Pin (do not update)", command=self.pin_selected).grid(row=0, column=5, padx=6, sticky="e")
-        ttk.Button(opt, text="Unpin", command=self.unpin_selected).grid(row=0, column=6, padx=6, sticky="e")
+        self.btn_pin = ttk.Button(opt, text="Pin (do not update)", command=self.pin_selected)
+        self.btn_pin.grid(row=0, column=5, padx=6, sticky="e")
+
+        self.btn_unpin = ttk.Button(opt, text="Unpin", command=self.unpin_selected)
+        self.btn_unpin.grid(row=0, column=6, padx=6, sticky="e")
 
         # Main split: table + log
         main = ttk.PanedWindow(self, orient="vertical")
@@ -308,6 +321,7 @@ class WingetGui(tk.Tk):
         self.menu.add_separator()
         self.menu.add_command(label="Install selected", command=self.install_selected)
         self.menu.add_command(label="Upgrade selected", command=self.upgrade_selected)
+        self.menu.add_command(label="Upgrade all", command=self.upgrade_all)
         self.menu.add_command(label="Uninstall selected", command=self.uninstall_selected)
         self.menu.add_separator()
         self.menu.add_command(label="Pin selected (do not update)", command=self.pin_selected)
@@ -325,10 +339,18 @@ class WingetGui(tk.Tk):
         self.log.configure(yscrollcommand=log_scroll.set)
         log_scroll.grid(row=0, column=1, sticky="ns")
 
-        # Status bar
+        # Status bar (text + progress)
         self.status = tk.StringVar(value="Ready")
-        sb = ttk.Label(self, textvariable=self.status, anchor="w", padding=6)
+
+        sb = ttk.Frame(self, padding=6)
         sb.grid(row=3, column=0, sticky="ew")
+        sb.columnconfigure(0, weight=1)
+
+        self.status_label = ttk.Label(sb, textvariable=self.status, anchor="w")
+        self.status_label.grid(row=0, column=0, sticky="ew")
+
+        self.progress = ttk.Progressbar(sb, mode="indeterminate", length=180)
+        self.progress.grid(row=0, column=1, padx=(10, 0), sticky="e")
 
     # ---- basics ----
 
@@ -355,7 +377,10 @@ class WingetGui(tk.Tk):
                 elif kind == "table":
                     self._fill_table(payload)
                 elif kind == "done":
-                    self.status.set("Ready")
+                    self._set_busy(False)
+                    # Keep "Loaded X rows." if that was the last status.
+                    if not (self.status.get() or "").startswith("Loaded"):
+                        self.status.set("Ready")
         except queue.Empty:
             pass
         self.after(120, self._poll_queue)
@@ -363,6 +388,41 @@ class WingetGui(tk.Tk):
     def _append_log(self, text: str) -> None:
         self.log.insert("end", text + "\n")
         self.log.see("end")
+
+    def _set_busy(self, busy: bool, text: Optional[str] = None) -> None:
+        """Show a simple busy indicator and disable actions while WinGet runs."""
+        if text is not None:
+            self.status.set(text)
+
+        # progressbar
+        try:
+            if busy:
+                self.progress.start(10)
+            else:
+                self.progress.stop()
+        except Exception:
+            pass
+
+        state = "disabled" if busy else "normal"
+        widgets = [
+            getattr(self, "mode_combo", None),
+            getattr(self, "search_entry", None),
+            getattr(self, "btn_refresh", None),
+            getattr(self, "btn_install", None),
+            getattr(self, "btn_upgrade", None),
+            getattr(self, "btn_upgrade_all", None),
+            getattr(self, "btn_uninstall", None),
+            getattr(self, "btn_pin", None),
+            getattr(self, "btn_unpin", None),
+        ]
+        for w in widgets:
+            if w is None:
+                continue
+            try:
+                w.configure(state=state)
+            except Exception:
+                pass
+
 
     def _popup_menu(self, event) -> None:
         try:
@@ -542,7 +602,7 @@ class WingetGui(tk.Tk):
         self.search_entry.state(["!disabled"]) 
 
         self._append_log(f"\n=== Refresh: {mode} ===")
-        self.status.set(f"Loading {mode}...")
+        self._set_busy(True, f"Loading {mode}...")
 
         def worker() -> None:
             self.work_q.put(("status", f"Reading pins..."))
@@ -634,13 +694,21 @@ class WingetGui(tk.Tk):
                 seen.add(x)
         return out
 
-    def _build_common_flags(self) -> List[str]:
-        flags: List[str] = ["--exact"]
+    def _build_common_flags(self, exact: bool = True) -> List[str]:
+        flags: List[str] = []
+        if exact:
+            flags.append("--exact")
+
+        # Show progress/UI by default. Silent suppresses all UI.
         if self.silent_var.get():
             flags.append("--silent")
+        else:
+            flags.append("--interactive")
+
         if self.accept_var.get():
             flags.extend(["--accept-package-agreements", "--accept-source-agreements"])
         return flags
+
 
     def install_selected(self) -> None:
         ids = self._selected_ids()
@@ -653,6 +721,20 @@ class WingetGui(tk.Tk):
         if not ids:
             return
         self._run_many("Upgrade", [["upgrade", "--id", pid] + self._build_common_flags() for pid in ids])
+
+
+    def upgrade_all(self) -> None:
+        if not messagebox.askyesno("Confirm upgrade all", "Upgrade all packages with available updates?"):
+            return
+
+        cmd = ["upgrade", "--all"]
+        if self.include_unknown_var.get():
+            cmd.append("--include-unknown")
+        if self.include_pinned_var.get():
+            cmd.append("--include-pinned")
+
+        cmd += self._build_common_flags(exact=False)
+        self._run_many("Upgrade All", [cmd])
 
     def uninstall_selected(self) -> None:
         ids = self._selected_ids()
@@ -668,6 +750,8 @@ class WingetGui(tk.Tk):
                 cmd.extend(["--source", "winget"])  # reduce MS Store agreement prompts
             if self.silent_var.get():
                 cmd.append("--silent")
+            else:
+                cmd.append("--interactive")
             if self.accept_var.get():
                 cmd.append("--accept-source-agreements")
             cmd.append("--force")
@@ -694,23 +778,24 @@ class WingetGui(tk.Tk):
         self._run_many("Unpin", cmds, refresh_after=True)
 
     def _run_many(self, title: str, cmd_lists: List[List[str]], refresh_after: bool = False) -> None:
-        self.status.set(f"{title} running...")
+        self._set_busy(True, f"{title} running...")
         self._append_log(f"\n=== {title} ===")
 
         def worker() -> None:
-            for cmd in cmd_lists:
-                self.work_q.put(("status", f"{title}: {' '.join(cmd)}"))
+            total = max(1, len(cmd_lists))
+            for i, cmd in enumerate(cmd_lists, start=1):
+                self.work_q.put(("status", f"{title} ({i}/{total}): winget {' '.join(cmd)}"))
                 rc, out = run_winget(cmd)
                 prefix = "$ winget " + " ".join(cmd)
                 self.work_q.put(("log", f"{prefix}\n{out}\n"))
             if refresh_after:
-                # update pins, refresh view
                 self.work_q.put(("status", "Refreshing..."))
             self.work_q.put(("done", None))
-            # refresh after actions (pins/upgrade/install) so the list stays correct
+            # Refresh after actions so the list stays correct
             self.after(0, self.refresh)
 
         threading.Thread(target=worker, daemon=True).start()
+
 
 
 def main() -> None:
