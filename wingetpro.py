@@ -175,6 +175,14 @@ def parse_winget_table(output: str) -> List[Dict[str, str]]:
         row: Dict[str, str] = {}
         for name, start, end in slices:
             row[name] = ln[start:end].strip()
+        # Fix: some winget outputs omit the Available column for certain rows
+        # even if the header includes it, which causes Source to slide under Available.
+        if ("Available" in row) and ("Source" in row):
+            av = (row.get("Available") or "").strip()
+            src = (row.get("Source") or "").strip()
+            if (not src) and av.lower() in {"winget", "msstore", "store"}:
+                row["Source"] = av
+                row["Available"] = ""
         # drop empty junk rows
         if any(v for v in row.values()):
             rows.append(row)
@@ -724,18 +732,55 @@ class WingetGui(tk.Tk):
                 return
 
             # Upgrades
-            cmd = ["upgrade"]
+            # Easy approach (as requested):
+            # 1) Read all installed packages (winget list)
+            # 2) Read upgradable packages (winget upgrade)
+            # 3) Show the same installed info, but only for packages that can be upgraded
+            #    (and exclude pinned unless "Include pinned" is checked)
+
+            rc_i, out_i = run_winget(["list"])
+            self.work_q.put(("log", f"$ winget list\n{out_i}\n"))
+            installed = self._to_rows(parse_winget_table(out_i))
+
+            cmd_u = ["upgrade"]
             if self.include_unknown_var.get():
-                cmd.append("--include-unknown")
-            if self.include_pinned_var.get():
-                cmd.append("--include-pinned")
-            rc, out = run_winget(cmd)
-            self.work_q.put(("log", f"$ winget {' '.join(cmd)}\n{out}\n"))
-            rows = self._to_rows(parse_winget_table(out))
+                cmd_u.append("--include-unknown")
+            # NOTE: We still *read* upgrades without --include-pinned, and then use our own
+            # pin list to filter them out (simpler and predictable).
+            rc_u, out_u = run_winget(cmd_u)
+            self.work_q.put(("log", f"$ winget {' '.join(cmd_u)}\n{out_u}\n"))
+            up_rows = self._to_rows(parse_winget_table(out_u))
+
+            up_by_id = {r.id: r for r in up_rows if r.id}
+
+            rows = []
+            for r in installed:
+                if not r.id:
+                    continue
+                u = up_by_id.get(r.id)
+                if not u:
+                    continue
+
+                is_pinned = (r.id in self.pins)
+                if is_pinned and (not self.include_pinned_var.get()):
+                    continue
+
+                # IMPORTANT:
+                # "Installed" mode already has the best Version/Available information.
+                # "Upgrades" should only be a filter over Installed.
+                # WinGet's "winget upgrade" output is sometimes missing/shifted columns,
+                # so we NEVER overwrite Installed's Available with an empty value.
+                if (not r.available) and u.available:
+                    r.available = u.available
+                # Source: keep installed source unless upgrade output has a non-empty one.
+                if u.source:
+                    r.source = u.source
+
+                rows.append(r)
+
             self.work_q.put(("all_rows", rows))
             self.work_q.put(("table", self._filter_rows(rows, query)))
             self.work_q.put(("done", None))
-
         threading.Thread(target=worker, daemon=True).start()
 
     def _to_rows(self, table_rows: List[Dict[str, str]]) -> List[PackageRow]:
