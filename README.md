@@ -18,6 +18,6 @@ URLs (WinGet docs):
 
 <img width="1156" height="641" alt="billede" src="https://github.com/user-attachments/assets/595c9f9f-6d10-4d61-86e4-55acbe86f4f6" />
 
-Have fun and keep you computer uptodate.
+Have fun and keep you computer up-to-date.
 
 Knud ;O)
