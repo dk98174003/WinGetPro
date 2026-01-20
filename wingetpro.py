@@ -143,12 +143,34 @@ def parse_winget_table(output: str) -> List[Dict[str, str]]:
         end = starts[i + 1] if i + 1 < len(starts) else None
         slices.append((name, start, end if end is not None else 10_000))
 
+    # WinGet often appends summary/help lines after the table, e.g.:
+    # "2 upgrades available." / "1 package(s) have pins that prevent upgrade." ...
+    # Those must NOT be treated as rows.
+    summary_patterns = [
+        r"^\d+\s+upgrades?\s+available\.?$",
+        r"^\d+\s+package\(s\)\s+have\s+pins\b.*$",
+        r"^\d+\s+package\(s\)\s+have\s+version\s+numbers\b.*$",
+        r"^\d+\s+package\(s\)\s+have\s+an\s+unknown\s+version\b.*$",
+    ]
+
     rows: List[Dict[str, str]] = []
     for ln in lines[delim_idx + 1 :]:
-        # Stop if winget prints a summary section
-        if ln.strip().lower().startswith("no installed package"):
+        s = ln.strip()
+        low = s.lower()
+
+        # Stop if winget prints a summary/help section
+        if low.startswith("no installed package"):
             break
-        if ln.strip().startswith("---"):
+        if any(re.match(p, low) for p in summary_patterns):
+            break
+        if low.startswith("use the 'winget pin'"):
+            break
+        if low.startswith("using the --include-pinned"):
+            break
+        if low.startswith("use --include-unknown"):
+            break
+
+        if s.startswith("---"):
             continue
         row: Dict[str, str] = {}
         for name, start, end in slices:
@@ -221,7 +243,6 @@ class WingetGui(tk.Tk):
         self._check_winget()
         self._poll_queue()
         # Make the table take most vertical space by default (user can drag sash).
-        self.after(200, self._init_default_sash)
 
         # Initial load: upgrades
         self.refresh()
@@ -283,17 +304,11 @@ class WingetGui(tk.Tk):
         self.btn_unpin = ttk.Button(opt, text="Unpin", command=self.unpin_selected)
         self.btn_unpin.grid(row=0, column=6, padx=6, sticky="e")
 
-        # Main split: table + log
-        main = ttk.PanedWindow(self, orient="vertical")
-        self._paned = main
-        main.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        # Main area: table only (no log/info window)
+        self._paned = None
 
-        table_frame = ttk.Frame(main)
-        log_frame = ttk.Frame(main)
-        # Give the table most of the resize weight.
-        main.add(table_frame, weight=8)
-        main.add(log_frame, weight=1)
-
+        table_frame = ttk.Frame(self)
+        table_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
 
@@ -334,15 +349,6 @@ class WingetGui(tk.Tk):
         self.menu.add_command(label="Open Winstall page", command=self.open_winstall_selected)
         self.menu.add_command(label="Open winget.run page", command=self.open_wingetrun_selected)
         self.tree.bind("<Button-3>", self._popup_menu)
-
-        # Log
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        self.log = tk.Text(log_frame, height=10, wrap="word")
-        self.log.grid(row=0, column=0, sticky="nsew")
-        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
-        self.log.configure(yscrollcommand=log_scroll.set)
-        log_scroll.grid(row=0, column=1, sticky="ns")
 
         # Status bar (text + progress)
         self.status = tk.StringVar(value="Ready")
@@ -391,8 +397,8 @@ class WingetGui(tk.Tk):
         self.after(120, self._poll_queue)
 
     def _append_log(self, text: str) -> None:
-        self.log.insert("end", text + "\n")
-        self.log.see("end")
+        """No log/info window: keep output silent (listview only)."""
+        return
 
     def _set_busy(self, busy: bool, text: Optional[str] = None) -> None:
         """Show a simple busy indicator and disable actions while WinGet runs."""
@@ -527,17 +533,6 @@ class WingetGui(tk.Tk):
         name = vals[0]
         pkg_id = vals[1]
         # Open package info page (winstall has a nice description)
-        webbrowser.open(self._winstall_url_for(pkg_id, name))
-
-        # Double-click on the "Id" column opens the package page
-        if col_index != 1:
-            return
-
-        vals = self.tree.item(row_id, "values") or ()
-        if len(vals) < 2:
-            return
-        name = vals[0]
-        pkg_id = vals[1]
         webbrowser.open(self._winstall_url_for(pkg_id, name))
 
 
