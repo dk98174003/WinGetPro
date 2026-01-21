@@ -400,6 +400,9 @@ class WingetGui(tk.Tk):
                     # Keep "Loaded X rows." if that was the last status.
                     if not (self.status.get() or "").startswith("Loaded"):
                         self.status.set("Ready")
+                    # Some actions request an automatic refresh after they finish.
+                    if payload is True:
+                        self.after(0, self.refresh)
         except queue.Empty:
             pass
         self.after(120, self._poll_queue)
@@ -714,8 +717,8 @@ class WingetGui(tk.Tk):
                     self.work_q.put(("table", []))
                     self.work_q.put(("done", None))
                     return
-                rc, out = run_winget(["search", query])
-                self.work_q.put(("log", f"$ winget search {query}\n{out}\n"))
+                rc, out = run_winget(["search", query, "--disable-interactivity"])
+                self.work_q.put(("log", f"$ winget search {query} --disable-interactivity\n{out}\n"))
                 rows = self._to_rows(parse_winget_table(out))
                 self.work_q.put(("all_rows", rows))
                 self.work_q.put(("table", self._filter_rows(rows, query)))
@@ -723,8 +726,8 @@ class WingetGui(tk.Tk):
                 return
 
             if mode == "Installed":
-                rc, out = run_winget(["list"])
-                self.work_q.put(("log", f"$ winget list\n{out}\n"))
+                rc, out = run_winget(["list", "--disable-interactivity"])
+                self.work_q.put(("log", f"$ winget list --disable-interactivity\n{out}\n"))
                 rows = self._to_rows(parse_winget_table(out))
                 self.work_q.put(("all_rows", rows))
                 self.work_q.put(("table", self._filter_rows(rows, query)))
@@ -738,17 +741,17 @@ class WingetGui(tk.Tk):
             # 3) Show the same installed info, but only for packages that can be upgraded
             #    (and exclude pinned unless "Include pinned" is checked)
 
-            rc_i, out_i = run_winget(["list"])
-            self.work_q.put(("log", f"$ winget list\n{out_i}\n"))
+            rc_i, out_i = run_winget(["list", "--disable-interactivity"])
+            self.work_q.put(("log", f"$ winget list --disable-interactivity\n{out_i}\n"))
             installed = self._to_rows(parse_winget_table(out_i))
 
-            cmd_u = ["upgrade"]
+            cmd_u = ["list", "--upgrade-available", "--disable-interactivity"]
             if self.include_unknown_var.get():
                 cmd_u.append("--include-unknown")
-            # NOTE: We still *read* upgrades without --include-pinned, and then use our own
+            # NOTE: We still *read* upgrade-available without --include-pinned, and then use our own
             # pin list to filter them out (simpler and predictable).
             rc_u, out_u = run_winget(cmd_u)
-            self.work_q.put(("log", f"$ winget {' '.join(cmd_u)}\n{out_u}\n"))
+            self.work_q.put(("log", "$ winget " + " ".join(cmd_u) + "\n" + out_u + "\n"))
             up_rows = self._to_rows(parse_winget_table(out_u))
 
             up_by_id = {r.id: r for r in up_rows if r.id}
@@ -851,13 +854,13 @@ class WingetGui(tk.Tk):
         ids = self._selected_ids()
         if not ids:
             return
-        self._run_many("Install", [["install", "--id", pid] + self._build_common_flags() for pid in ids])
+        self._run_many("Install", [["install", "--id", pid] + self._build_common_flags() for pid in ids], refresh_after=True)
 
     def upgrade_selected(self) -> None:
         ids = self._selected_ids()
         if not ids:
             return
-        self._run_many("Upgrade", [["upgrade", "--id", pid] + self._build_common_flags() for pid in ids])
+        self._run_many("Upgrade", [["upgrade", "--id", pid] + self._build_common_flags() for pid in ids], refresh_after=True)
 
 
     def upgrade_all(self) -> None:
@@ -871,7 +874,7 @@ class WingetGui(tk.Tk):
             cmd.append("--include-pinned")
 
         cmd += self._build_common_flags(exact=False)
-        self._run_many("Upgrade All", [cmd])
+        self._run_many("Upgrade All", [cmd], refresh_after=True)
 
     def uninstall_selected(self) -> None:
         ids = self._selected_ids()
@@ -894,7 +897,7 @@ class WingetGui(tk.Tk):
             cmd.append("--force")
             return cmd
 
-        self._run_many("Uninstall", [build(pid) for pid in ids])
+        self._run_many("Uninstall", [build(pid) for pid in ids], refresh_after=True)
 
     def pin_selected(self) -> None:
         ids = self._selected_ids()
@@ -927,9 +930,8 @@ class WingetGui(tk.Tk):
                 self.work_q.put(("log", f"{prefix}\n{out}\n"))
             if refresh_after:
                 self.work_q.put(("status", "Refreshing..."))
-            self.work_q.put(("done", None))
-            # Refresh after actions so the list stays correct
-            self.after(0, self.refresh)
+            # Ask the UI thread to refresh *after* the worker is fully done
+            self.work_q.put(("done", True if refresh_after else None))
 
         threading.Thread(target=worker, daemon=True).start()
 
